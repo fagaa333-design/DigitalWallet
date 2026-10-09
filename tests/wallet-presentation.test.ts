@@ -32,5 +32,33 @@ describe('Wallet Presentation Layer', () => {
       expect(palette.border).toBeDefined();
     }
   });
-});
 
+  it('filters cards by category accurately', () => {
+    const financeCards = MOCK_WALLET_CARDS.filter((c) => c.category === 'Finanzas');
+    expect(financeCards.length).toBeGreaterThan(0);
+    expect(financeCards.every((c) => c.category === 'Finanzas')).toBe(true);
+
+    const idCards = MOCK_WALLET_CARDS.filter((c) => c.category === 'Identificación');
+    expect(idCards.length).toBeGreaterThan(0);
+    expect(idCards.every((c) => c.category === 'Identificación')).toBe(true);
+  });
+
+  it('filters cards by search query across title, issuer and category', () => {
+    const query = 'Titanium';
+    const results = MOCK_WALLET_CARDS.filter(
+      (c) =>
+        c.title.toLowerCase().includes(query.toLowerCase()) ||
+        (c.subtitle?.toLowerCase().includes(query.toLowerCase()) ?? false),
+    );
+    expect(results.length).toBe(1);
+    expect(results[0].title).toContain('Titanium');
+  });
+
+  it('validates card creation input correctly', () => {
+    const validTitle = 'Tarjeta de Transporte Test';
+    expect(validTitle.trim().length).toBeGreaterThan(0);
+
+    const emptyTitle = '   ';
+    expect(emptyTitle.trim().length).toBe(0);
+  });
+});

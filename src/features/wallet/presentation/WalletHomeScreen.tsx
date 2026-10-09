@@ -5,8 +5,11 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
+  ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { useWalletTheme } from './theme';
 import {
   HeaderBar,
@@ -20,34 +23,37 @@ import {
   FeaturedCardHero,
 } from './components/cards';
 import {
-  CardDetailModal,
-  AddCardNoticeModal,
   SettingsPreviewModal,
 } from './components/modals';
-import { MOCK_WALLET_CARDS } from './data/mock-cards';
 import {
   CardPresentationItem,
   CategoryFilterKey,
 } from './types/presentation-types';
+import { useWallet } from './context/wallet-context';
+import { UiIcon } from './components/icons';
 
 interface WalletHomeScreenProps {
   initialCards?: CardPresentationItem[];
 }
 
 export const WalletHomeScreen: React.FC<WalletHomeScreenProps> = ({
-  initialCards = MOCK_WALLET_CARDS,
+  initialCards,
 }) => {
-  const { colors, typography, spacing, isDark } = useWalletTheme();
+  const { colors, typography, spacing, isDark, borderRadius } = useWalletTheme();
+  const {
+    cards: contextCards,
+    loading,
+    error,
+    clearError,
+  } = useWallet();
 
-  // State management
-  const [cards] = useState<CardPresentationItem[]>(initialCards);
+  // If initialCards is provided (e.g. in standalone tests), use it; otherwise use context cards
+  const cards = initialCards ?? contextCards;
+
+  // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] =
     useState<CategoryFilterKey>('all');
-  const [selectedCard, setSelectedCard] =
-    useState<CardPresentationItem | null>(null);
-  const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
-  const [isAddNoticeVisible, setIsAddNoticeVisible] = useState(false);
   const [isSettingsVisible, setIsSettingsVisible] = useState(false);
 
   // Filter & Search Logic
@@ -95,10 +101,21 @@ export const WalletHomeScreen: React.FC<WalletHomeScreenProps> = ({
     return counts;
   }, [cards]);
 
-  // Handlers
+  // Navigation Handlers
   const handleSelectCard = (card: CardPresentationItem) => {
-    setSelectedCard(card);
-    setIsDetailModalVisible(true);
+    try {
+      router.push({ pathname: '/card/[id]', params: { id: card.id } });
+    } catch {
+      // In non-router test contexts, no-op gracefully
+    }
+  };
+
+  const handleAddCard = () => {
+    try {
+      router.push('/card/new');
+    } catch {
+      // In non-router test contexts, no-op gracefully
+    }
   };
 
   const handleResetFilters = () => {
@@ -106,8 +123,6 @@ export const WalletHomeScreen: React.FC<WalletHomeScreenProps> = ({
     setSelectedCategory('all');
   };
 
-  // Recent/Grid cards: if searching or filtered, show all matches;
-  // otherwise show cards that aren't in the hero or the full list
   const isFilteredOrSearching =
     searchQuery.trim().length > 0 || selectedCategory !== 'all';
 
@@ -127,6 +142,29 @@ export const WalletHomeScreen: React.FC<WalletHomeScreenProps> = ({
         greeting="Bóveda Local Protegida"
         onPressSettings={() => setIsSettingsVisible(true)}
       />
+
+      {/* Error notification banner if any */}
+      {error && (
+        <View
+          style={[
+            styles.errorBanner,
+            {
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              borderColor: colors.danger,
+              borderRadius: borderRadius.md,
+              marginHorizontal: spacing.lg,
+            },
+          ]}
+        >
+          <UiIcon name="alert" size={16} color={colors.danger} />
+          <Text style={[typography.caption, { color: colors.danger, flex: 1 }]}>
+            {error}
+          </Text>
+          <TouchableOpacity onPress={clearError}>
+            <UiIcon name="close" size={12} color={colors.danger} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -148,6 +186,13 @@ export const WalletHomeScreen: React.FC<WalletHomeScreenProps> = ({
           onSelectCategory={setSelectedCategory}
           categoryCounts={categoryCounts}
         />
+
+        {/* Loading Indicator */}
+        {loading && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={colors.accent} />
+          </View>
+        )}
 
         {/* Hero Featured Stack (displayed when not searching to give clean hero view) */}
         {!isFilteredOrSearching && cards.length > 0 && (
@@ -188,7 +233,7 @@ export const WalletHomeScreen: React.FC<WalletHomeScreenProps> = ({
           <EmptyWalletState
             isSearching={isFilteredOrSearching}
             onResetSearch={handleResetFilters}
-            onAddCard={() => setIsAddNoticeVisible(true)}
+            onAddCard={handleAddCard}
           />
         )}
       </ScrollView>
@@ -205,28 +250,12 @@ export const WalletHomeScreen: React.FC<WalletHomeScreenProps> = ({
         ]}
       >
         <AddCardButton
-          onPress={() => setIsAddNoticeVisible(true)}
+          onPress={handleAddCard}
           label="Añadir tarjeta o documento"
         />
       </View>
 
-      {/* Card Detail Modal */}
-      <CardDetailModal
-        card={selectedCard}
-        visible={isDetailModalVisible}
-        onClose={() => {
-          setIsDetailModalVisible(false);
-          setSelectedCard(null);
-        }}
-      />
-
-      {/* Add Card Flow Notice Modal */}
-      <AddCardNoticeModal
-        visible={isAddNoticeVisible}
-        onClose={() => setIsAddNoticeVisible(false)}
-      />
-
-      {/* Settings Preview Modal */}
+      {/* Settings Diagnostic Modal */}
       <SettingsPreviewModal
         visible={isSettingsVisible}
         onClose={() => setIsSettingsVisible(false)}
@@ -241,6 +270,18 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingTop: 4,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 10,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  loadingContainer: {
+    paddingVertical: 10,
+    alignItems: 'center',
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -262,4 +303,3 @@ const styles = StyleSheet.create({
     right: 0,
   },
 });
-

@@ -7,6 +7,10 @@ export type UiIconName =
   | 'close'
   | 'settings'
   | 'chevronRight'
+  | 'arrowLeft'
+  | 'trash'
+  | 'copy'
+  | 'alert'
   | 'card'
   | 'badge'
   | 'shield'
@@ -191,6 +195,160 @@ export const UiIcon: React.FC<UiIconProps> = ({
               },
             ]}
           />
+        </View>
+      );
+    }
+
+    case 'arrowLeft': {
+      const lineThickness = Math.max(2, size * 0.1);
+      const chevronSize = size * 0.35;
+      return (
+        <View style={containerStyle}>
+          {/* Arrow stem */}
+          <View
+            style={{
+              position: 'absolute',
+              height: lineThickness,
+              width: size * 0.65,
+              backgroundColor: color,
+              borderRadius: lineThickness / 2,
+              right: size * 0.15,
+            }}
+          />
+          {/* Arrow head */}
+          <View
+            style={{
+              position: 'absolute',
+              width: chevronSize,
+              height: chevronSize,
+              borderLeftColor: color,
+              borderTopColor: color,
+              borderLeftWidth: lineThickness,
+              borderTopWidth: lineThickness,
+              transform: [{ rotate: '-45deg' }],
+              left: size * 0.18,
+            }}
+          />
+        </View>
+      );
+    }
+
+    case 'trash': {
+      const bW = Math.max(1.6, size * 0.08);
+      const w = size * 0.62;
+      const h = size * 0.65;
+      return (
+        <View style={containerStyle}>
+          {/* Lid */}
+          <View
+            style={{
+              position: 'absolute',
+              top: size * 0.12,
+              width: size * 0.75,
+              height: bW,
+              backgroundColor: color,
+              borderRadius: 1,
+            }}
+          />
+          {/* Handle */}
+          <View
+            style={{
+              position: 'absolute',
+              top: size * 0.06,
+              width: size * 0.3,
+              height: bW,
+              backgroundColor: color,
+              borderRadius: 1,
+            }}
+          />
+          {/* Can */}
+          <View
+            style={{
+              position: 'absolute',
+              bottom: size * 0.12,
+              width: w,
+              height: h,
+              borderColor: color,
+              borderWidth: bW,
+              borderTopWidth: 0,
+              borderBottomLeftRadius: 3,
+              borderBottomRightRadius: 3,
+            }}
+          />
+        </View>
+      );
+    }
+
+    case 'copy': {
+      const bW = Math.max(1.5, size * 0.08);
+      const boxSize = size * 0.52;
+      return (
+        <View style={containerStyle}>
+          {/* Back box */}
+          <View
+            style={{
+              position: 'absolute',
+              top: size * 0.14,
+              right: size * 0.14,
+              width: boxSize,
+              height: boxSize,
+              borderColor: color,
+              borderWidth: bW,
+              borderRadius: 2,
+              opacity: 0.5,
+            }}
+          />
+          {/* Front box */}
+          <View
+            style={{
+              position: 'absolute',
+              bottom: size * 0.14,
+              left: size * 0.14,
+              width: boxSize,
+              height: boxSize,
+              borderColor: color,
+              borderWidth: bW,
+              borderRadius: 2,
+              backgroundColor: 'transparent',
+            }}
+          />
+        </View>
+      );
+    }
+
+    case 'alert': {
+      const bW = Math.max(1.8, size * 0.09);
+      return (
+        <View style={containerStyle}>
+          <View
+            style={{
+              width: size * 0.82,
+              height: size * 0.82,
+              borderRadius: size * 0.41,
+              borderColor: color,
+              borderWidth: bW,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <View
+              style={{
+                width: bW,
+                height: size * 0.3,
+                backgroundColor: color,
+                borderRadius: bW / 2,
+                marginBottom: 2,
+              }}
+            />
+            <View
+              style={{
+                width: bW,
+                height: bW,
+                backgroundColor: color,
+                borderRadius: bW / 2,
+              }}
+            />
+          </View>
         </View>
       );
     }
