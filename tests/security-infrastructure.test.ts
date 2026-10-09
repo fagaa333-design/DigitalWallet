@@ -128,6 +128,30 @@ describe('encrypted wallet files', () => {
     expect(fileSystemMock.files.size).toBe(1);
   });
 
+  it('refuses to replace a missing purpose key when its marker is initialized', async () => {
+    await initializeWalletKeys();
+    secureStoreMock.values.delete('wallet.data-key.v1.database');
+
+    await expect(initializeWalletKeys()).rejects.toThrow(
+      'The wallet database key is missing. Refusing to generate a replacement.',
+    );
+  });
+
+  it('rejects access when master key record has an unsupported format', async () => {
+    await initializeWalletKeys();
+    secureStoreMock.values.set('wallet.master-key.v1', 'corrupted-key-without-prefix');
+
+    await expect(withDatabaseKey(async () => undefined)).rejects.toThrow(
+      'The stored wallet master key has an unsupported format.',
+    );
+  });
+
+  it('rejects withDatabaseKey when security has not been initialized', async () => {
+    await expect(withDatabaseKey(async () => undefined)).rejects.toThrow(
+      'Wallet database encryption key is unavailable.',
+    );
+  });
+
   it('uses a fresh GCM nonce for each encryption operation', async () => {
     await initializeWalletKeys();
     const plaintext = new TextEncoder().encode('same payload');
@@ -138,6 +162,74 @@ describe('encrypted wallet files', () => {
     const second = await new File(directory, `${secondId}.dwf`).bytes();
 
     expect(bytesEqual(first.slice(4, 16), second.slice(4, 16))).toBe(false);
+  });
+
+  it('rejects file when magic envelope header is corrupted', async () => {
+    await initializeWalletKeys();
+    const fileId = await storeWalletFile(new TextEncoder().encode('header tamper payload'));
+    const file = new File(new Directory(Paths.document, 'wallet-items-encrypted'), `${fileId}.dwf`);
+    const stored = await file.bytes();
+    stored[0] = 0x00;
+    file.write(stored);
+
+    await expect(readWalletFile(fileId)).rejects.toThrow(
+      'Encrypted wallet file has an unsupported or corrupt format.',
+    );
+  });
+
+  it('rejects file when payload length is truncated below minimum envelope size', async () => {
+    await initializeWalletKeys();
+    const fileId = await storeWalletFile(new TextEncoder().encode('payload'));
+    const file = new File(new Directory(Paths.document, 'wallet-items-encrypted'), `${fileId}.dwf`);
+    file.write(new Uint8Array([0x44, 0x57, 0x46, 0x01, 0x01]));
+
+    await expect(readWalletFile(fileId)).rejects.toThrow(
+      'Encrypted wallet file has an unsupported or corrupt format.',
+    );
+  });
+
+  it('rejects authenticated data after nonce / IV tampering', async () => {
+    await initializeWalletKeys();
+    const fileId = await storeWalletFile(new TextEncoder().encode('iv tamper payload'));
+    const file = new File(new Directory(Paths.document, 'wallet-items-encrypted'), `${fileId}.dwf`);
+    const stored = await file.bytes();
+    stored[5] ^= 0x01;
+    file.write(stored);
+
+    await expect(readWalletFile(fileId)).rejects.toThrow();
+  });
+
+  it('rejects authenticated data after tag tampering', async () => {
+    await initializeWalletKeys();
+    const fileId = await storeWalletFile(new TextEncoder().encode('tag tamper payload'));
+    const file = new File(new Directory(Paths.document, 'wallet-items-encrypted'), `${fileId}.dwf`);
+    const stored = await file.bytes();
+    stored[stored.length - 1] ^= 0x01;
+    file.write(stored);
+
+    await expect(readWalletFile(fileId)).rejects.toThrow();
+  });
+
+  it('rejects reading encrypted file when fileId does not match AAD bound during encryption', async () => {
+    await initializeWalletKeys();
+    const originalId = await storeWalletFile(new TextEncoder().encode('aad bound document'));
+    const fakeId = '00000000-0000-4000-8000-000000000001';
+    const directory = new Directory(Paths.document, 'wallet-items-encrypted');
+    const originalFile = new File(directory, `${originalId}.dwf`);
+    const fakeFile = new File(directory, `${fakeId}.dwf`);
+    fakeFile.create();
+    fakeFile.write(await originalFile.bytes());
+
+    await expect(readWalletFile(fakeId)).rejects.toThrow();
+  });
+
+  it('rejects path traversal attempts with invalid file IDs', async () => {
+    await expect(readWalletFile('../relative/path')).rejects.toThrow(
+      'Invalid wallet file identifier.',
+    );
+    expect(() => deleteWalletFile('../relative/path')).toThrow(
+      'Invalid wallet file identifier.',
+    );
   });
 });
 

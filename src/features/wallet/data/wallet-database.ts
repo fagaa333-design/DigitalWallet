@@ -85,50 +85,45 @@ async function initializeWalletDatabase(): Promise<SQLite.SQLiteDatabase> {
       throw new Error('The wallet database key has an unsupported format.');
     }
 
-    await database.execAsync(`PRAGMA key = "x'${keyHex}'";`);
-
-    const cipherVersion = await database.getFirstAsync<{ cipher_version: string }>(
-      'PRAGMA cipher_version;',
-    );
-    if (!cipherVersion?.cipher_version) {
-      await database.closeAsync();
-      throw new Error(
-        'SQLCipher is unavailable in this native build. Use a development or production build; Expo Go is not supported.',
-      );
-    }
-
-    let schemaCheck: { count: number } | null;
     try {
-      schemaCheck = await database.getFirstAsync<{ count: number }>(
+      await database.execAsync(`PRAGMA key = "x'${keyHex}'";`);
+
+      const cipherVersion = await database.getFirstAsync<{ cipher_version: string }>(
+        'PRAGMA cipher_version;',
+      );
+      if (!cipherVersion?.cipher_version) {
+        throw new Error(
+          'SQLCipher is unavailable in this native build. Use a development or production build; Expo Go is not supported.',
+        );
+      }
+
+      const schemaCheck = await database.getFirstAsync<{ count: number }>(
         'SELECT count(*) AS count FROM sqlite_master;',
       );
+      if (schemaCheck === null) {
+        throw new Error('Could not validate the encrypted wallet database.');
+      }
+
+      await database.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+
+      const versionRow = await database.getFirstAsync<{ user_version: number }>(
+        'PRAGMA user_version;',
+      );
+      if (versionRow === null) {
+        throw new Error('Could not read the wallet database schema version.');
+      }
+      if (versionRow.user_version > DATABASE_SCHEMA_VERSION) {
+        throw new Error(
+          `Wallet database version ${versionRow.user_version} is newer than supported version ${DATABASE_SCHEMA_VERSION}.`,
+        );
+      }
+
+      await applyMigrations(database, versionRow.user_version);
+      return database;
     } catch (error) {
       await database.closeAsync();
       throw error;
     }
-    if (schemaCheck === null) {
-      await database.closeAsync();
-      throw new Error('Could not validate the encrypted wallet database.');
-    }
-
-    await database.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
-
-    const versionRow = await database.getFirstAsync<{ user_version: number }>(
-      'PRAGMA user_version;',
-    );
-    if (versionRow === null) {
-      await database.closeAsync();
-      throw new Error('Could not read the wallet database schema version.');
-    }
-    if (versionRow.user_version > DATABASE_SCHEMA_VERSION) {
-      await database.closeAsync();
-      throw new Error(
-        `Wallet database version ${versionRow.user_version} is newer than supported version ${DATABASE_SCHEMA_VERSION}.`,
-      );
-    }
-
-    await applyMigrations(database, versionRow.user_version);
-    return database;
   });
 }
 
