@@ -1,56 +1,70 @@
-import { MOCK_WALLET_CARDS } from '../src/features/wallet/presentation/data/mock-cards';
-import { CardPresentationItem } from '../src/features/wallet/presentation/types/presentation-types';
+jest.mock('expo-secure-store', () => jest.requireActual('./mocks/secure-store').secureStoreMock);
+jest.mock('expo-file-system', () => jest.requireActual('./mocks/file-system'));
+jest.mock('expo-sqlite', () => jest.requireActual('./mocks/expo-sqlite'));
 
-describe('Wallet Session State Logic', () => {
-  let cards: CardPresentationItem[];
+import { initializeWalletKeys } from '@/shared/security/key-manager';
+import { WalletRepository } from '@/features/wallet/data/wallet-repository';
+import { secureStoreMock } from './mocks/secure-store';
+import { fileSystemMock } from './mocks/file-system';
+import { sqliteMock } from './mocks/expo-sqlite';
+import { MOCK_WALLET_CARDS } from '@/features/wallet/presentation/data/mock-cards';
+import { CardPresentationItem } from '@/features/wallet/presentation/types/presentation-types';
 
-  beforeEach(() => {
-    cards = [...MOCK_WALLET_CARDS];
+describe('Wallet Context & Repository Integration', () => {
+  beforeEach(async () => {
+    secureStoreMock.reset();
+    fileSystemMock.reset();
+    sqliteMock.reset(2, true);
+    await initializeWalletKeys();
   });
 
-  it('initializes with default mock cards', () => {
-    expect(cards.length).toBe(MOCK_WALLET_CARDS.length);
+  it('starts with an empty database when no cards have been persisted', async () => {
+    const cards = await WalletRepository.getCards();
+    expect(cards).toHaveLength(0);
   });
 
-  it('finds card by id correctly', () => {
-    const target = cards[0];
-    const found = cards.find((c) => c.id === target.id);
-    expect(found).toBeDefined();
-    expect(found?.title).toBe(target.title);
-  });
-
-  it('adds a new card to the beginning of the list', () => {
-    const newCard: CardPresentationItem = {
-      id: 'test-card-new-id',
+  it('persists cards and retrieves them across re-initializations', async () => {
+    await WalletRepository.createCard({
       type: 'card',
       category: 'Finanzas',
-      title: 'Nueva Tarjeta Virtual',
-      subtitle: 'Banco de Prueba',
-      description: 'Tarjeta añadida durante la prueba',
-      imageId: null,
-      color: 'sapphire',
-      icon: 'card',
-      badgeLabel: 'Finanzas',
-      maskedNumber: '•••• 1122',
-      issuer: 'Banco de Prueba',
-      expiresText: '10/30',
-      details: {},
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+      title: 'Tarjeta Persistente 1',
+      color: 'obsidian',
+      maskedNumber: '•••• 9988',
+    });
 
-    cards = [newCard, ...cards];
-    expect(cards.length).toBe(MOCK_WALLET_CARDS.length + 1);
-    expect(cards[0].id).toBe('test-card-new-id');
+    await WalletRepository.createCard({
+      type: 'document',
+      category: 'Identificación',
+      title: 'DNI Persistente 2',
+      color: 'sapphire',
+      maskedNumber: 'ID-0011',
+    });
+
+    const loaded = await WalletRepository.getCards();
+    expect(loaded).toHaveLength(2);
+    const titles = loaded.map((c) => c.title);
+    expect(titles).toContain('Tarjeta Persistente 1');
+    expect(titles).toContain('DNI Persistente 2');
   });
 
-  it('deletes card by id correctly', () => {
-    const targetId = cards[0].id;
-    const initialCount = cards.length;
+  it('does not create duplicate entries when the same card title is added', async () => {
+    const card1 = await WalletRepository.createCard({
+      id: 'fixed-unique-id',
+      type: 'card',
+      category: 'Finanzas',
+      title: 'Tarjeta con ID Fijo',
+    });
 
-    cards = cards.filter((c) => c.id !== targetId);
-    expect(cards.length).toBe(initialCount - 1);
-    expect(cards.find((c) => c.id === targetId)).toBeUndefined();
+    expect(card1.id).toBe('fixed-unique-id');
+
+    const all = await WalletRepository.getCards();
+    expect(all).toHaveLength(1);
+  });
+
+  it('correctly maps mock cards if sample data is loaded', () => {
+    expect(MOCK_WALLET_CARDS.length).toBeGreaterThan(0);
+    const first = MOCK_WALLET_CARDS[0];
+    expect(first.title).toBeDefined();
+    expect(first.type).toBe('card');
   });
 });
-

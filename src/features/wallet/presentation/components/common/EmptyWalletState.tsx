@@ -7,12 +7,14 @@ interface EmptyWalletStateProps {
   isSearching?: boolean;
   onResetSearch?: () => void;
   onAddCard?: () => void;
+  onLoadSamples?: () => void;
 }
 
 export const EmptyWalletState: React.FC<EmptyWalletStateProps> = ({
   isSearching,
   onResetSearch,
   onAddCard,
+  onLoadSamples,
 }) => {
   const { colors, typography, spacing, borderRadius } = useWalletTheme();
 
@@ -66,7 +68,7 @@ export const EmptyWalletState: React.FC<EmptyWalletStateProps> = ({
       >
         {isSearching
           ? 'No encontramos tarjetas ni documentos que coincidan con los criterios ingresados.'
-          : 'Comienza agregando tu primera tarjeta, documento de identidad o membresía segura.'}
+          : 'Comienza agregando tu primera tarjeta, documento de identidad o credencial segura.'}
       </Text>
 
       {isSearching && onResetSearch ? (
@@ -94,28 +96,56 @@ export const EmptyWalletState: React.FC<EmptyWalletStateProps> = ({
           </Text>
         </TouchableOpacity>
       ) : onAddCard ? (
-        <TouchableOpacity
-          onPress={onAddCard}
-          activeOpacity={0.8}
-          style={[
-            styles.actionButton,
-            {
-              backgroundColor: colors.accent,
-              borderRadius: borderRadius.lg,
-            },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Añadir tarjeta ahora"
-        >
-          <Text
+        <View style={styles.actionsColumn}>
+          <TouchableOpacity
+            onPress={onAddCard}
+            activeOpacity={0.8}
             style={[
-              typography.bodyMedium,
-              { color: colors.accentContrast, fontWeight: '700' },
+              styles.actionButton,
+              {
+                backgroundColor: colors.accent,
+                borderRadius: borderRadius.lg,
+              },
             ]}
+            accessibilityRole="button"
+            accessibilityLabel="Añadir tarjeta ahora"
           >
-            Añadir tarjeta ahora
-          </Text>
-        </TouchableOpacity>
+            <Text
+              style={[
+                typography.bodyMedium,
+                { color: colors.accentContrast, fontWeight: '700' },
+              ]}
+            >
+              Añadir tarjeta ahora
+            </Text>
+          </TouchableOpacity>
+
+          {onLoadSamples && (
+            <TouchableOpacity
+              onPress={onLoadSamples}
+              activeOpacity={0.75}
+              style={[
+                styles.sampleButton,
+                {
+                  borderColor: colors.border,
+                  borderRadius: borderRadius.lg,
+                  backgroundColor: colors.surfaceSubtle,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Cargar tarjetas de ejemplo"
+            >
+              <Text
+                style={[
+                  typography.caption,
+                  { color: colors.textSecondary, fontWeight: '600' },
+                ]}
+              >
+                Cargar tarjetas de ejemplo
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       ) : null}
     </View>
   );
@@ -154,11 +184,23 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 20,
   },
+  actionsColumn: {
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+  },
   actionButton: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 22,
     paddingVertical: 12,
     borderWidth: 1,
     borderColor: 'transparent',
+    alignItems: 'center',
+    minWidth: 200,
+  },
+  sampleButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderWidth: 1,
+    alignItems: 'center',
   },
 });
-

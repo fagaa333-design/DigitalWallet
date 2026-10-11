@@ -45,6 +45,7 @@ export const WalletHomeScreen: React.FC<WalletHomeScreenProps> = ({
     loading,
     error,
     clearError,
+    loadSampleCards,
   } = useWallet();
 
   // If initialCards is provided (e.g. in standalone tests), use it; otherwise use context cards
@@ -234,6 +235,7 @@ export const WalletHomeScreen: React.FC<WalletHomeScreenProps> = ({
             isSearching={isFilteredOrSearching}
             onResetSearch={handleResetFilters}
             onAddCard={handleAddCard}
+            onLoadSamples={loadSampleCards}
           />
         )}
       </ScrollView>

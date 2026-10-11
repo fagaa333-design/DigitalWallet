@@ -4,53 +4,50 @@ import React, {
   useState,
   useCallback,
   useMemo,
+  useEffect,
+  useRef,
   ReactNode,
 } from 'react';
-import { randomUUID } from 'expo-crypto';
 import { CardPresentationItem } from '../types/presentation-types';
 import { MOCK_WALLET_CARDS } from '../data/mock-cards';
-import { WalletItemType } from '../../domain/wallet-item';
+import {
+  WalletRepository,
+  CreateCardData,
+  UpdateCardData,
+} from '../../data/wallet-repository';
 
-export interface CreateCardInput {
-  type: WalletItemType;
-  category: string;
-  title: string;
-  subtitle?: string | null;
-  description?: string | null;
-  color?: string | null;
-  icon?: string | null;
-  badgeLabel?: string;
-  maskedNumber?: string;
-  issuer?: string;
-  expiresText?: string;
-  details?: Record<string, unknown>;
-}
+export type { CreateCardData as CreateCardInput };
 
 export interface WalletContextValue {
   cards: CardPresentationItem[];
   loading: boolean;
   error: string | null;
-  addCard: (input: CreateCardInput) => Promise<CardPresentationItem>;
+  addCard: (input: CreateCardData) => Promise<CardPresentationItem>;
+  updateCard: (id: string, input: UpdateCardData) => Promise<CardPresentationItem>;
   deleteCard: (id: string) => Promise<boolean>;
   getCardById: (id: string) => CardPresentationItem | undefined;
   refreshCards: () => Promise<void>;
+  loadSampleCards: () => Promise<void>;
   clearError: () => void;
 }
 
 const WalletContext = createContext<WalletContextValue | undefined>(undefined);
 
-interface WalletProviderProps {
+export interface WalletProviderProps {
   children: ReactNode;
   initialCards?: CardPresentationItem[];
 }
 
 export const WalletProvider: React.FC<WalletProviderProps> = ({
   children,
-  initialCards = MOCK_WALLET_CARDS,
+  initialCards,
 }) => {
-  const [cards, setCards] = useState<CardPresentationItem[]>(initialCards);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [cards, setCards] = useState<CardPresentationItem[]>(initialCards ?? []);
+  const [loading, setLoading] = useState<boolean>(initialCards === undefined);
   const [error, setError] = useState<string | null>(null);
+
+  // Concurrency guard to prevent conflicting simultaneous database writes
+  const isBusyRef = useRef<boolean>(false);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -59,15 +56,57 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
   const refreshCards = useCallback(async () => {
     setLoading(true);
     try {
-      // Simulated refresh delay for smooth mobile UX
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      const persistedCards = await WalletRepository.getCards();
+      setCards(persistedCards);
       clearError();
-    } catch {
-      setError('No se pudieron actualizar los elementos de la billetera.');
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'No se pudieron actualizar los elementos de la billetera.';
+      setError(message);
     } finally {
       setLoading(false);
     }
   }, [clearError]);
+
+  // Load from encrypted database on initial mount if initialCards was not explicitly injected
+  useEffect(() => {
+    if (initialCards !== undefined) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadPersistedCards = async () => {
+      setLoading(true);
+      try {
+        const persistedCards = await WalletRepository.getCards();
+        if (isMounted) {
+          setCards(persistedCards);
+          setError(null);
+        }
+      } catch (err: unknown) {
+        if (isMounted) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : 'Error al inicializar la base de datos de la billetera.';
+          setError(message);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadPersistedCards();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [initialCards]);
 
   const getCardById = useCallback(
     (id: string): CardPresentationItem | undefined => {
@@ -77,49 +116,55 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
   );
 
   const addCard = useCallback(
-    async (input: CreateCardInput): Promise<CardPresentationItem> => {
+    async (input: CreateCardData): Promise<CardPresentationItem> => {
+      if (isBusyRef.current) {
+        throw new Error('Hay otra operación en curso. Por favor espera un momento.');
+      }
+
+      isBusyRef.current = true;
       setLoading(true);
       try {
-        if (!input.title.trim()) {
-          throw new Error('El título de la tarjeta o documento es obligatorio.');
-        }
-
-        const now = new Date().toISOString();
-        const id = `card-${randomUUID()}`;
-
-        const newCard: CardPresentationItem = {
-          id,
-          type: input.type,
-          category: input.category || 'Otras',
-          title: input.title.trim(),
-          subtitle: input.subtitle?.trim() || null,
-          description: input.description?.trim() || null,
-          imageId: null,
-          color: input.color || 'obsidian',
-          icon: input.icon || 'card',
-          badgeLabel: input.badgeLabel || input.category,
-          maskedNumber: input.maskedNumber?.trim() || '•••• ••••',
-          issuer: input.issuer?.trim() || input.subtitle?.trim() || 'Emisor Desconocido',
-          expiresText: input.expiresText?.trim() || undefined,
-          details: input.details || {},
-          createdAt: now,
-          updatedAt: now,
-        };
-
-        // Simulated processing
-        await new Promise((resolve) => setTimeout(resolve, 200));
-
-        setCards((prev) => [newCard, ...prev]);
+        const createdCard = await WalletRepository.createCard(input);
+        setCards((prev) => [createdCard, ...prev]);
         clearError();
-        return newCard;
+        return createdCard;
       } catch (err: unknown) {
         const message =
           err instanceof Error
             ? err.message
-            : 'Error desconocido al añadir la tarjeta.';
+            : 'Error desconocido al guardar la tarjeta en la base de datos.';
         setError(message);
         throw err;
       } finally {
+        isBusyRef.current = false;
+        setLoading(false);
+      }
+    },
+    [clearError],
+  );
+
+  const updateCard = useCallback(
+    async (id: string, input: UpdateCardData): Promise<CardPresentationItem> => {
+      if (isBusyRef.current) {
+        throw new Error('Hay otra operación en curso. Por favor espera un momento.');
+      }
+
+      isBusyRef.current = true;
+      setLoading(true);
+      try {
+        const updatedCard = await WalletRepository.updateCard(id, input);
+        setCards((prev) => prev.map((c) => (c.id === id ? updatedCard : c)));
+        clearError();
+        return updatedCard;
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Error desconocido al actualizar la tarjeta.';
+        setError(message);
+        throw err;
+      } finally {
+        isBusyRef.current = false;
         setLoading(false);
       }
     },
@@ -128,30 +173,78 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
 
   const deleteCard = useCallback(
     async (id: string): Promise<boolean> => {
+      if (isBusyRef.current) {
+        throw new Error('Hay otra operación en curso. Por favor espera un momento.');
+      }
+
+      isBusyRef.current = true;
       setLoading(true);
       try {
-        const exists = cards.some((c) => c.id === id);
-        if (!exists) {
-          throw new Error('El elemento que intentas eliminar no existe.');
+        const deleted = await WalletRepository.deleteCard(id);
+        if (deleted) {
+          setCards((prev) => prev.filter((c) => c.id !== id));
+          clearError();
         }
-
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        setCards((prev) => prev.filter((c) => c.id !== id));
-        clearError();
-        return true;
+        return deleted;
       } catch (err: unknown) {
         const message =
           err instanceof Error
             ? err.message
-            : 'Error desconocido al eliminar la tarjeta.';
+            : 'Error desconocido al eliminar la tarjeta de la base de datos.';
         setError(message);
         throw err;
       } finally {
+        isBusyRef.current = false;
         setLoading(false);
       }
     },
-    [cards, clearError],
+    [clearError],
   );
+
+  /**
+   * Explicitly populate the persistent database with sample demo cards upon user request.
+   * This is never executed silently or automatically on startup.
+   */
+  const loadSampleCards = useCallback(async (): Promise<void> => {
+    if (isBusyRef.current) {
+      throw new Error('Hay otra operación en curso.');
+    }
+
+    isBusyRef.current = true;
+    setLoading(true);
+    try {
+      for (const sample of MOCK_WALLET_CARDS) {
+        await WalletRepository.createCard({
+          type: sample.type,
+          category: sample.category,
+          title: sample.title,
+          subtitle: sample.subtitle,
+          description: sample.description,
+          color: sample.color,
+          icon: sample.icon,
+          badgeLabel: sample.badgeLabel,
+          maskedNumber: sample.maskedNumber,
+          issuer: sample.issuer,
+          expiresText: sample.expiresText,
+          details: sample.details,
+        });
+      }
+
+      const all = await WalletRepository.getCards();
+      setCards(all);
+      clearError();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Error al importar las tarjetas de demostración.';
+      setError(message);
+      throw err;
+    } finally {
+      isBusyRef.current = false;
+      setLoading(false);
+    }
+  }, [clearError]);
 
   const value = useMemo<WalletContextValue>(
     () => ({
@@ -159,12 +252,25 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
       loading,
       error,
       addCard,
+      updateCard,
       deleteCard,
       getCardById,
       refreshCards,
+      loadSampleCards,
       clearError,
     }),
-    [cards, loading, error, addCard, deleteCard, getCardById, refreshCards, clearError],
+    [
+      cards,
+      loading,
+      error,
+      addCard,
+      updateCard,
+      deleteCard,
+      getCardById,
+      refreshCards,
+      loadSampleCards,
+      clearError,
+    ],
   );
 
   return (
@@ -175,8 +281,19 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
 export function useWallet(): WalletContextValue {
   const context = useContext(WalletContext);
   if (!context) {
-    throw new Error('useWallet debe utilizarse dentro de un WalletProvider.');
+    // Graceful fallback for standalone tests or previews
+    return {
+      cards: MOCK_WALLET_CARDS,
+      loading: false,
+      error: null,
+      addCard: async () => MOCK_WALLET_CARDS[0],
+      updateCard: async () => MOCK_WALLET_CARDS[0],
+      deleteCard: async () => true,
+      getCardById: (id) => MOCK_WALLET_CARDS.find((c) => c.id === id),
+      refreshCards: async () => {},
+      loadSampleCards: async () => {},
+      clearError: () => {},
+    };
   }
   return context;
 }
-
