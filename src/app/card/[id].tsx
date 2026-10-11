@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Modal,
   Pressable,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -14,6 +16,7 @@ import { useWalletTheme } from '@/features/wallet/presentation/theme';
 import { UiIcon } from '@/features/wallet/presentation/components/icons';
 import { DigitalWalletCard } from '@/features/wallet/presentation/components/cards';
 import { useWallet } from '@/features/wallet/presentation/context/wallet-context';
+import { loadDecryptedImageDataUri } from '@/features/wallet/services/image-storage-service';
 
 export default function CardDetailRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -24,7 +27,39 @@ export default function CardDetailRoute() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
 
+  const [decryptedImageUri, setDecryptedImageUri] = useState<string | null>(null);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+
   const card = id ? getCardById(id) : undefined;
+
+  useEffect(() => {
+    let isMounted = true;
+    if (card?.imageId) {
+      setImageLoading(true);
+      setImageError(null);
+      loadDecryptedImageDataUri(card.imageId)
+        .then((uri) => {
+          if (isMounted) {
+            setDecryptedImageUri(uri);
+            setImageLoading(false);
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            setImageError('No se pudo descifrar la imagen adjunta.');
+            setImageLoading(false);
+          }
+        });
+    } else {
+      setDecryptedImageUri(null);
+      setImageLoading(false);
+      setImageError(null);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [card?.imageId]);
 
   const handleCopy = () => {
     setCopyFeedback(true);
@@ -243,6 +278,77 @@ export default function CardDetailRoute() {
             <Text style={[typography.body, { color: colors.textPrimary }]}>
               {card.description}
             </Text>
+          </View>
+        )}
+
+        {/* Attached Decrypted Document / Image */}
+        {card.imageId && (
+          <View style={styles.sectionBlock}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={[typography.overline, styles.sectionTitle, { color: colors.textSecondary }]}>
+                DOCUMENTO ADJUNTO CIFRADO
+              </Text>
+              <View style={styles.encryptedTag}>
+                <UiIcon name="shield" size={12} color={colors.success} />
+                <Text style={[typography.caption, { color: colors.success, fontSize: 11, fontWeight: '700' }]}>
+                  AES-GCM 256-bit
+                </Text>
+              </View>
+            </View>
+
+            {imageLoading ? (
+              <View
+                style={[
+                  styles.imagePlaceholderBox,
+                  {
+                    backgroundColor: colors.surfaceSubtle,
+                    borderColor: colors.border,
+                    borderRadius: borderRadius.lg,
+                  },
+                ]}
+              >
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 8 }]}>
+                  Descifrando documento seguro en memoria...
+                </Text>
+              </View>
+            ) : imageError ? (
+              <View
+                style={[
+                  styles.imagePlaceholderBox,
+                  {
+                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                    borderColor: colors.danger,
+                    borderRadius: borderRadius.lg,
+                  },
+                ]}
+              >
+                <UiIcon name="alert" size={20} color={colors.danger} />
+                <Text style={[typography.caption, { color: colors.danger, marginTop: 6, fontWeight: '600' }]}>
+                  {imageError}
+                </Text>
+              </View>
+            ) : decryptedImageUri ? (
+              <View
+                style={[
+                  styles.attachedImageContainer,
+                  {
+                    backgroundColor: colors.surfaceSubtle,
+                    borderColor: colors.border,
+                    borderRadius: borderRadius.lg,
+                  },
+                ]}
+              >
+                <Image
+                  source={{ uri: decryptedImageUri }}
+                  style={[styles.attachedImage, { borderRadius: borderRadius.md }]}
+                  resizeMode="contain"
+                />
+                <Text style={[typography.caption, { color: colors.textTertiary, marginTop: 8, textAlign: 'center' }]}>
+                  Renderizado seguro en memoria • Sin persistencia en texto plano
+                </Text>
+              </View>
+            ) : null}
           </View>
         )}
 
@@ -500,6 +606,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'transparent',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  encryptedTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  imagePlaceholderBox: {
+    borderWidth: 1,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachedImageContainer: {
+    borderWidth: 1,
+    padding: 12,
+    alignItems: 'center',
+  },
+  attachedImage: {
+    width: '100%',
+    height: 220,
   },
 });
 

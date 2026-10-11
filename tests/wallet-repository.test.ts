@@ -136,5 +136,42 @@ describe('WalletRepository', () => {
 
     await expect(WalletRepository.getCards()).rejects.toThrow('Disk I/O error');
   });
+
+  it('rolls back and deletes encrypted file when card creation fails at database level', async () => {
+    const deleteFileSpy = jest.spyOn(walletFiles, 'deleteWalletFile').mockImplementation(() => {});
+    sqliteMock.database.runAsync.mockRejectedValueOnce(new Error('Constraint failure'));
+
+    await expect(
+      WalletRepository.createCard({
+        type: 'card',
+        category: 'Finanzas',
+        title: 'Tarjeta Fallida',
+        imageId: 'orphan-image-file-id-1234',
+      }),
+    ).rejects.toThrow('Constraint failure');
+
+    expect(deleteFileSpy).toHaveBeenCalledWith('orphan-image-file-id-1234');
+    deleteFileSpy.mockRestore();
+  });
+
+  it('deletes old encrypted file when an image is replaced during card update', async () => {
+    const deleteFileSpy = jest.spyOn(walletFiles, 'deleteWalletFile').mockImplementation(() => {});
+
+    const card = await WalletRepository.createCard({
+      type: 'document',
+      category: 'Identificación',
+      title: 'Licencia',
+      imageId: 'original-image-id',
+    });
+
+    const updated = await WalletRepository.updateCard(card.id, {
+      imageId: 'replaced-image-id',
+    });
+
+    expect(updated.imageId).toBe('replaced-image-id');
+    expect(deleteFileSpy).toHaveBeenCalledWith('original-image-id');
+
+    deleteFileSpy.mockRestore();
+  });
 });
 

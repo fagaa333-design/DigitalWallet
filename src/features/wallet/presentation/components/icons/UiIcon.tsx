@@ -19,7 +19,8 @@ export type UiIconName =
   | 'star'
   | 'wallet'
   | 'tag'
-  | 'check';
+  | 'check'
+  | 'image';
 
 interface UiIconProps {
   name: UiIconName | string;
@@ -670,6 +671,52 @@ export const UiIcon: React.FC<UiIconProps> = ({
               },
             ]}
           />
+        </View>
+      );
+    }
+
+    case 'image': {
+      const bW = Math.max(1.6, size * 0.08);
+      const w = size * 0.8;
+      const h = size * 0.65;
+      return (
+        <View style={containerStyle}>
+          <View
+            style={{
+              width: w,
+              height: h,
+              borderColor: color,
+              borderWidth: bW,
+              borderRadius: 3,
+              overflow: 'hidden',
+              position: 'relative',
+              justifyContent: 'flex-end',
+            }}
+          >
+            <View
+              style={{
+                position: 'absolute',
+                top: h * 0.18,
+                right: w * 0.18,
+                width: size * 0.16,
+                height: size * 0.16,
+                borderRadius: size * 0.08,
+                backgroundColor: color,
+              }}
+            />
+            <View
+              style={{
+                position: 'absolute',
+                bottom: -w * 0.15,
+                left: w * 0.08,
+                width: w * 0.6,
+                height: w * 0.6,
+                borderColor: color,
+                borderWidth: bW,
+                transform: [{ rotate: '45deg' }],
+              }}
+            />
+          </View>
         </View>
       );
     }

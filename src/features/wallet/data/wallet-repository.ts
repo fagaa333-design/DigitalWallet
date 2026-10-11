@@ -162,26 +162,45 @@ export class WalletRepository {
 
     const database = await getWalletDatabase();
 
-    await database.runAsync(
-      `INSERT INTO wallet_items (
-        id, type, category, title, subtitle, description, image_id, color, icon, details_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-      id,
-      data.type,
-      data.category.trim(),
-      data.title.trim(),
-      data.subtitle?.trim() || null,
-      data.description?.trim() || null,
-      data.imageId || null,
-      data.color || null,
-      data.icon || null,
-      JSON.stringify(detailsPayload),
-      now,
-      now,
-    );
+    try {
+      await database.runAsync(
+        `INSERT INTO wallet_items (
+          id, type, category, title, subtitle, description, image_id, color, icon, details_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        id,
+        data.type,
+        data.category.trim(),
+        data.title.trim(),
+        data.subtitle?.trim() || null,
+        data.description?.trim() || null,
+        data.imageId || null,
+        data.color || null,
+        data.icon || null,
+        JSON.stringify(detailsPayload),
+        now,
+        now,
+      );
+    } catch (insertError) {
+      // Prevent orphaned encrypted file if database insertion fails
+      if (data.imageId) {
+        try {
+          deleteWalletFile(data.imageId);
+        } catch {
+          // best-effort cleanup
+        }
+      }
+      throw insertError;
+    }
 
     const createdCard = await this.getCardById(id);
     if (!createdCard) {
+      if (data.imageId) {
+        try {
+          deleteWalletFile(data.imageId);
+        } catch {
+          // best-effort cleanup
+        }
+      }
       throw new Error('No se pudo verificar la creación de la tarjeta en la base de datos.');
     }
 
@@ -231,23 +250,45 @@ export class WalletRepository {
     };
 
     const database = await getWalletDatabase();
+    const oldImageId = existingCard.imageId;
 
-    await database.runAsync(
-      `UPDATE wallet_items
-       SET type = ?, category = ?, title = ?, subtitle = ?, description = ?, image_id = ?, color = ?, icon = ?, details_json = ?, updated_at = ?
-       WHERE id = ?;`,
-      updatedType,
-      updatedCategory,
-      updatedTitle,
-      updatedSubtitle,
-      updatedDescription,
-      updatedImageId,
-      updatedColor,
-      updatedIcon,
-      JSON.stringify(mergedDetails),
-      now,
-      id,
-    );
+    try {
+      await database.runAsync(
+        `UPDATE wallet_items
+         SET type = ?, category = ?, title = ?, subtitle = ?, description = ?, image_id = ?, color = ?, icon = ?, details_json = ?, updated_at = ?
+         WHERE id = ?;`,
+        updatedType,
+        updatedCategory,
+        updatedTitle,
+        updatedSubtitle,
+        updatedDescription,
+        updatedImageId,
+        updatedColor,
+        updatedIcon,
+        JSON.stringify(mergedDetails),
+        now,
+        id,
+      );
+    } catch (updateError) {
+      // If a new image was passed but database update failed, clean up the orphaned newly created file
+      if (data.imageId && data.imageId !== oldImageId) {
+        try {
+          deleteWalletFile(data.imageId);
+        } catch {
+          // best-effort cleanup
+        }
+      }
+      throw updateError;
+    }
+
+    // Now that the new reference is safely persisted, clean up previous image file if it was replaced
+    if (oldImageId && data.imageId !== undefined && data.imageId !== oldImageId) {
+      try {
+        deleteWalletFile(oldImageId);
+      } catch {
+        // best-effort cleanup of replaced file
+      }
+    }
 
     const updatedCard = await this.getCardById(id);
     if (!updatedCard) {

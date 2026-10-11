@@ -8,6 +8,8 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -18,6 +20,10 @@ import { useWallet } from '@/features/wallet/presentation/context/wallet-context
 import { CardPresentationItem, CategoryFilterKey } from '@/features/wallet/presentation/types/presentation-types';
 import { WalletItemType, WALLET_ITEM_TYPES } from '@/features/wallet/domain/wallet-item';
 import { CARD_PALETTES } from '@/features/wallet/presentation/theme/colors';
+import {
+  pickAndEncryptImage,
+  deleteEncryptedImage,
+} from '@/features/wallet/services/image-storage-service';
 
 const CATEGORIES: CategoryFilterKey[] = [
   'Identificación',
@@ -52,6 +58,9 @@ export default function NewCardRoute() {
   const [expiresText, setExpiresText] = useState('');
   const [description, setDescription] = useState('');
   const [colorKey, setColorKey] = useState<string>('obsidian');
+  const [imageId, setImageId] = useState<string | null>(null);
+  const [imagePreviewUri, setImagePreviewUri] = useState<string | null>(null);
+  const [isPickingImage, setIsPickingImage] = useState(false);
 
   // UI status
   const [submitting, setSubmitting] = useState(false);
@@ -65,7 +74,7 @@ export default function NewCardRoute() {
     title: title.trim() || 'Título de la Tarjeta',
     subtitle: subtitle.trim() || 'Emisor o Subtítulo',
     description: description.trim() || null,
-    imageId: null,
+    imageId: imageId ?? null,
     color: colorKey,
     icon: type === 'document' ? 'badge' : type === 'ticket' ? 'transit' : type === 'membership' ? 'star' : type === 'credential' ? 'book' : 'card',
     badgeLabel: category,
@@ -75,6 +84,42 @@ export default function NewCardRoute() {
     details: {},
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+  };
+
+  const handlePickImage = async () => {
+    setIsPickingImage(true);
+    setErrorMessage(null);
+    try {
+      const result = await pickAndEncryptImage();
+      if (result.cancelled) {
+        return;
+      }
+      if (result.error) {
+        setErrorMessage(result.error);
+        return;
+      }
+      if (result.fileId && result.previewDataUri) {
+        if (imageId) {
+          deleteEncryptedImage(imageId);
+        }
+        setImageId(result.fileId);
+        setImagePreviewUri(result.previewDataUri);
+      }
+    } catch (err: unknown) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Error al procesar la imagen.',
+      );
+    } finally {
+      setIsPickingImage(false);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    if (imageId) {
+      deleteEncryptedImage(imageId);
+    }
+    setImageId(null);
+    setImagePreviewUri(null);
   };
 
   const handleSave = async () => {
@@ -93,6 +138,7 @@ export default function NewCardRoute() {
         title: title.trim(),
         subtitle: subtitle.trim() || null,
         description: description.trim() || null,
+        imageId: imageId ?? null,
         color: colorKey,
         icon: previewCard.icon,
         badgeLabel: category,
@@ -404,6 +450,96 @@ export default function NewCardRoute() {
             />
           </View>
 
+          {/* Form: Documento o Fotografía Adjunta */}
+          <View style={styles.formSection}>
+            <Text style={[typography.caption, styles.fieldLabel, { color: colors.textPrimary }]}>
+              Documento o Fotografía Adjunta (Cifrado AES-GCM)
+            </Text>
+            {imagePreviewUri ? (
+              <View
+                style={[
+                  styles.imagePreviewBox,
+                  {
+                    backgroundColor: colors.surfaceSubtle,
+                    borderColor: colors.border,
+                    borderRadius: borderRadius.md,
+                  },
+                ]}
+              >
+                <Image
+                  source={{ uri: imagePreviewUri }}
+                  style={[styles.imagePreview, { borderRadius: borderRadius.sm }]}
+                  resizeMode="cover"
+                />
+                <View style={styles.imageInfoContainer}>
+                  <View style={styles.imageSecureTag}>
+                    <UiIcon name="shield" size={14} color={colors.success} />
+                    <Text style={[typography.caption, { color: colors.success, fontWeight: '600' }]}>
+                      Cifrado seguro (.dwf)
+                    </Text>
+                  </View>
+                  <Text style={[typography.caption, { color: colors.textSecondary }]}>
+                    Archivo autenticado en reposo con AES-GCM de 256 bits.
+                  </Text>
+                  <TouchableOpacity
+                    onPress={handleRemoveImage}
+                    style={[
+                      styles.removeImageBtn,
+                      {
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        borderColor: colors.danger,
+                        borderRadius: borderRadius.md,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Quitar fotografía"
+                  >
+                    <UiIcon name="trash" size={14} color={colors.danger} />
+                    <Text style={[typography.caption, { color: colors.danger, fontWeight: '700' }]}>
+                      Quitar Fotografía
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={handlePickImage}
+                disabled={isPickingImage}
+                style={[
+                  styles.imagePickerBtn,
+                  {
+                    backgroundColor: colors.surfaceSubtle,
+                    borderColor: colors.border,
+                    borderRadius: borderRadius.md,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Adjuntar foto o documento seguro"
+              >
+                {isPickingImage ? (
+                  <View style={styles.pickingLoadingRow}>
+                    <ActivityIndicator size="small" color={colors.accent} />
+                    <Text style={[typography.caption, { color: colors.textSecondary, marginLeft: 8 }]}>
+                      Cifrando fotografía de forma segura...
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.pickerContentRow}>
+                    <UiIcon name="image" size={24} color={colors.accent} />
+                    <View style={{ marginLeft: 12, flex: 1 }}>
+                      <Text style={[typography.bodyMedium, { color: colors.textPrimary, fontWeight: '600' }]}>
+                        Adjuntar foto o documento seguro
+                      </Text>
+                      <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 2 }]}>
+                        Se cifrará con AES-GCM (JPG, PNG, WEBP • Máx. 5 MB)
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+
           {/* Security Notice */}
           <View
             style={[
@@ -417,7 +553,7 @@ export default function NewCardRoute() {
           >
             <UiIcon name="shield" size={16} color={colors.success} />
             <Text style={[typography.caption, { color: colors.textSecondary, flex: 1 }]}>
-              Esta tarjeta se añade de forma segura en memoria para la sesión activa. La persistencia cifrada nativa se activará al enlazar con SQLCipher.
+              Esta tarjeta y sus archivos adjuntos se almacenan cifrados con SQLCipher y AES-GCM, protegiendo tus datos en todo momento.
             </Text>
           </View>
 
@@ -535,6 +671,53 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 8,
+  },
+  imagePickerBtn: {
+    padding: 16,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+  },
+  pickingLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  imagePreviewBox: {
+    padding: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  imagePreview: {
+    width: 84,
+    height: 84,
+  },
+  imageInfoContainer: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  imageSecureTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  removeImageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+    marginTop: 6,
   },
 });
 

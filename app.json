@@ -30,7 +30,13 @@
           "useSQLCipher": true
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Digital Wallet requiere acceso a tus fotos para adjuntar imágenes a tus documentos de forma cifrada."
+        }
+      ]
     ]
   }
 }
