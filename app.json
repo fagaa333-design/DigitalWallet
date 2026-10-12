@@ -36,6 +36,12 @@
         {
           "photosPermission": "Digital Wallet requiere acceso a tus fotos para adjuntar imágenes a tus documentos de forma cifrada."
         }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Permite a Digital Wallet verificar tu identidad para desbloquear tus documentos y tarjetas."
+        }
       ]
     ]
   }

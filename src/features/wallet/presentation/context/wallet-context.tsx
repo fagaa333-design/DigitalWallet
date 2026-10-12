@@ -15,6 +15,7 @@ import {
   CreateCardData,
   UpdateCardData,
 } from '../../data/wallet-repository';
+import { useOptionalWalletAuth } from './wallet-auth-context';
 
 export type { CreateCardData as CreateCardInput };
 
@@ -36,12 +37,16 @@ const WalletContext = createContext<WalletContextValue | undefined>(undefined);
 export interface WalletProviderProps {
   children: ReactNode;
   initialCards?: CardPresentationItem[];
+  isLocked?: boolean;
 }
 
 export const WalletProvider: React.FC<WalletProviderProps> = ({
   children,
   initialCards,
+  isLocked: isLockedProp,
 }) => {
+  const auth = useOptionalWalletAuth();
+  const isLocked = isLockedProp !== undefined ? isLockedProp : (auth?.isLocked ?? false);
   const [cards, setCards] = useState<CardPresentationItem[]>(initialCards ?? []);
   const [loading, setLoading] = useState<boolean>(initialCards === undefined);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +59,10 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
   }, []);
 
   const refreshCards = useCallback(async () => {
+    if (isLocked) {
+      throw new Error('La sesión de la billetera está bloqueada. Autentícate para continuar.');
+    }
+
     setLoading(true);
     try {
       const persistedCards = await WalletRepository.getCards();
@@ -68,11 +77,18 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [clearError]);
+  }, [clearError, isLocked]);
 
-  // Load from encrypted database on initial mount if initialCards was not explicitly injected
+  // Load from encrypted database when unlocked if initialCards was not explicitly injected
   useEffect(() => {
     if (initialCards !== undefined) {
+      return;
+    }
+
+    if (isLocked) {
+      // Clear in-memory cards while locked to prevent exposure in state and memory dumps
+      setCards([]);
+      setLoading(false);
       return;
     }
 
@@ -82,12 +98,12 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
       setLoading(true);
       try {
         const persistedCards = await WalletRepository.getCards();
-        if (isMounted) {
+        if (isMounted && !isLocked) {
           setCards(persistedCards);
           setError(null);
         }
       } catch (err: unknown) {
-        if (isMounted) {
+        if (isMounted && !isLocked) {
           const message =
             err instanceof Error
               ? err.message
@@ -106,7 +122,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [initialCards]);
+  }, [initialCards, isLocked]);
 
   const getCardById = useCallback(
     (id: string): CardPresentationItem | undefined => {
@@ -117,6 +133,10 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
 
   const addCard = useCallback(
     async (input: CreateCardData): Promise<CardPresentationItem> => {
+      if (isLocked) {
+        throw new Error('La sesión de la billetera está bloqueada. Autentícate para continuar.');
+      }
+
       if (isBusyRef.current) {
         throw new Error('Hay otra operación en curso. Por favor espera un momento.');
       }
@@ -140,11 +160,15 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
         setLoading(false);
       }
     },
-    [clearError],
+    [clearError, isLocked],
   );
 
   const updateCard = useCallback(
     async (id: string, input: UpdateCardData): Promise<CardPresentationItem> => {
+      if (isLocked) {
+        throw new Error('La sesión de la billetera está bloqueada. Autentícate para continuar.');
+      }
+
       if (isBusyRef.current) {
         throw new Error('Hay otra operación en curso. Por favor espera un momento.');
       }
@@ -168,11 +192,15 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
         setLoading(false);
       }
     },
-    [clearError],
+    [clearError, isLocked],
   );
 
   const deleteCard = useCallback(
     async (id: string): Promise<boolean> => {
+      if (isLocked) {
+        throw new Error('La sesión de la billetera está bloqueada. Autentícate para continuar.');
+      }
+
       if (isBusyRef.current) {
         throw new Error('Hay otra operación en curso. Por favor espera un momento.');
       }
@@ -198,7 +226,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
         setLoading(false);
       }
     },
-    [clearError],
+    [clearError, isLocked],
   );
 
   /**
@@ -206,6 +234,10 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
    * This is never executed silently or automatically on startup.
    */
   const loadSampleCards = useCallback(async (): Promise<void> => {
+    if (isLocked) {
+      throw new Error('La sesión de la billetera está bloqueada. Autentícate para continuar.');
+    }
+
     if (isBusyRef.current) {
       throw new Error('Hay otra operación en curso.');
     }
@@ -244,7 +276,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
       isBusyRef.current = false;
       setLoading(false);
     }
-  }, [clearError]);
+  }, [clearError, isLocked]);
 
   const value = useMemo<WalletContextValue>(
     () => ({
