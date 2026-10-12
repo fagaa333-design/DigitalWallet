@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -62,6 +62,24 @@ export default function NewCardRoute() {
   const [imagePreviewUri, setImagePreviewUri] = useState<string | null>(null);
   const [isPickingImage, setIsPickingImage] = useState(false);
 
+  // References to track image lifecycle and prevent orphaned encrypted files on cancel/back
+  const imageIdRef = useRef<string | null>(null);
+  const isSavedRef = useRef<boolean>(false);
+
+  // Sync ref with image state
+  useEffect(() => {
+    imageIdRef.current = imageId;
+  }, [imageId]);
+
+  // Clean up any unsaved temporary encrypted image (.dwf) if user navigates back or cancels
+  useEffect(() => {
+    return () => {
+      if (imageIdRef.current && !isSavedRef.current) {
+        deleteEncryptedImage(imageIdRef.current);
+      }
+    };
+  }, []);
+
   // UI status
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -99,9 +117,10 @@ export default function NewCardRoute() {
         return;
       }
       if (result.fileId && result.previewDataUri) {
-        if (imageId) {
-          deleteEncryptedImage(imageId);
+        if (imageIdRef.current) {
+          deleteEncryptedImage(imageIdRef.current);
         }
+        imageIdRef.current = result.fileId;
         setImageId(result.fileId);
         setImagePreviewUri(result.previewDataUri);
       }
@@ -115,9 +134,10 @@ export default function NewCardRoute() {
   };
 
   const handleRemoveImage = () => {
-    if (imageId) {
-      deleteEncryptedImage(imageId);
+    if (imageIdRef.current) {
+      deleteEncryptedImage(imageIdRef.current);
     }
+    imageIdRef.current = null;
     setImageId(null);
     setImagePreviewUri(null);
   };
@@ -151,8 +171,11 @@ export default function NewCardRoute() {
         },
       });
 
+      // Mark as saved so the unmount cleanup effect preserves the encrypted image
+      isSavedRef.current = true;
       router.back();
     } catch (err: unknown) {
+      // Keep isSavedRef.current false, but do NOT delete image so user can retry saving
       setErrorMessage(
         err instanceof Error ? err.message : 'Error al guardar la tarjeta.',
       );

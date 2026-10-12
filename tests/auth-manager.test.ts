@@ -21,8 +21,12 @@ import {
   setupPin,
   verifyPin,
   isPinConfigured,
+  getConfiguredPinLength,
   getPinLockoutStatus,
   changePin,
+  recoverPinWithBiometrics,
+  verifyBiometricForRecovery,
+  removePinConfig,
   getBiometricsStatus,
   authenticateWithBiometrics,
   pbkdf2HmacSha256,
@@ -223,4 +227,134 @@ describe('auth-manager', () => {
       expect(key1).not.toEqual(diffKey);
     });
   });
+
+  describe('SEC-001: PIN Length Tracking & Incomplete Input Safety', () => {
+    it('returns null when no PIN is configured', async () => {
+      expect(await getConfiguredPinLength()).toBeNull();
+    });
+
+    it('correctly tracks and returns configured PIN length for 4, 5, and 6 digits', async () => {
+      await setupPin('1234');
+      expect(await getConfiguredPinLength()).toBe(4);
+
+      await setupPin('12345');
+      expect(await getConfiguredPinLength()).toBe(5);
+
+      await setupPin('123456');
+      expect(await getConfiguredPinLength()).toBe(6);
+
+      await removePinConfig();
+      expect(await getConfiguredPinLength()).toBeNull();
+    });
+
+    it('does not penalize or increment failed attempts for incomplete or invalid length PIN inputs', async () => {
+      await setupPin('54321');
+
+      // Candidate PINs shorter than 4 or longer than 6 digits should fail validation without incrementing attempts
+      const resultShort1 = await verifyPin('1');
+      expect(resultShort1.success).toBe(false);
+      expect(resultShort1.error).toContain('entre 4 y 6 dígitos');
+
+      const resultShort2 = await verifyPin('123');
+      expect(resultShort2.success).toBe(false);
+
+      const resultLong = await verifyPin('1234567');
+      expect(resultLong.success).toBe(false);
+
+      const lockout = await getPinLockoutStatus();
+      expect(lockout.failedAttempts).toBe(0);
+      expect(lockout.isLockedOut).toBe(false);
+
+      // Now verify that the actual valid 5-digit PIN works perfectly
+      const validResult = await verifyPin('54321');
+      expect(validResult.success).toBe(true);
+    });
+
+    it('successfully verifies 5 and 6 digit PINs', async () => {
+      await setupPin('98765');
+      expect((await verifyPin('98765')).success).toBe(true);
+
+      await setupPin('123456');
+      expect((await verifyPin('123456')).success).toBe(true);
+      expect((await verifyPin('654321')).success).toBe(false);
+    });
+  });
+
+  describe('SEC-003: Biometric PIN Recovery', () => {
+    it('rejects invalid PIN format during recovery without prompting biometrics', async () => {
+      const resShort = await recoverPinWithBiometrics('12');
+      expect(resShort.success).toBe(false);
+      expect(resShort.error).toContain('entre 4 y 6 dígitos');
+      expect(mockAuthenticateAsync).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when biometrics hardware or enrollment is not available', async () => {
+      mockHasHardwareAsync.mockResolvedValueOnce(false);
+      mockIsEnrolledAsync.mockResolvedValueOnce(false);
+
+      const res = await recoverPinWithBiometrics('1234');
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('hardware biométrico');
+    });
+
+    it('fails closed when biometric verification is cancelled by user', async () => {
+      await setupPin('1111');
+
+      mockHasHardwareAsync.mockResolvedValueOnce(true);
+      mockIsEnrolledAsync.mockResolvedValueOnce(true);
+      mockSupportedTypesAsync.mockResolvedValueOnce([1]);
+      mockAuthenticateAsync.mockResolvedValueOnce({
+        success: false,
+        error: 'user_cancel',
+      });
+
+      const res = await recoverPinWithBiometrics('2222');
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('cancelada');
+
+      // Previous PIN must remain active and unchanged!
+      expect((await verifyPin('1111')).success).toBe(true);
+      expect((await verifyPin('2222')).success).toBe(false);
+    });
+
+    it('successfully recovers and updates PIN when biometric check passes', async () => {
+      await setupPin('1111');
+      expect(await getConfiguredPinLength()).toBe(4);
+
+      mockHasHardwareAsync.mockResolvedValueOnce(true);
+      mockIsEnrolledAsync.mockResolvedValueOnce(true);
+      mockSupportedTypesAsync.mockResolvedValueOnce([1]);
+      mockAuthenticateAsync.mockResolvedValueOnce({ success: true });
+
+      const res = await recoverPinWithBiometrics('654321');
+      expect(res.success).toBe(true);
+      expect(await getConfiguredPinLength()).toBe(6);
+
+      // Old PIN is no longer valid; new 6-digit PIN works!
+      expect((await verifyPin('1111')).success).toBe(false);
+      expect((await verifyPin('654321')).success).toBe(true);
+    });
+
+    it('supports two-step recovery flow with verifyBiometricForRecovery', async () => {
+      await setupPin('4444');
+
+      // Step 1: Pre-authorization via biometrics
+      mockHasHardwareAsync.mockResolvedValueOnce(true);
+      mockIsEnrolledAsync.mockResolvedValueOnce(true);
+      mockSupportedTypesAsync.mockResolvedValueOnce([2]);
+      mockAuthenticateAsync.mockResolvedValueOnce({ success: true });
+
+      const verifyRes = await verifyBiometricForRecovery();
+      expect(verifyRes.success).toBe(true);
+
+      // Step 2: Apply new PIN without re-prompting biometrics
+      const recoverRes = await recoverPinWithBiometrics('55555');
+      expect(recoverRes.success).toBe(true);
+      expect(await getConfiguredPinLength()).toBe(5);
+
+      expect((await verifyPin('55555')).success).toBe(true);
+      expect((await verifyPin('4444')).success).toBe(false);
+    });
+  });
 });
+

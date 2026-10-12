@@ -1,9 +1,11 @@
 import * as LocalAuthentication from 'expo-local-authentication';
+import { getRandomValues } from 'expo-crypto';
 import { getSecret, setSecret, removeSecret } from './secret-store';
 
 // Storage keys in SecureStore
 const PIN_HASH_KEY = 'wallet.auth.pin_hash.v1';
 const PIN_SALT_KEY = 'wallet.auth.pin_salt.v1';
+const PIN_LENGTH_KEY = 'wallet.auth.pin_length.v1';
 const PIN_ATTEMPTS_KEY = 'wallet.auth.pin_attempts.v1';
 const PIN_LOCKOUT_KEY = 'wallet.auth.pin_lockout_until.v1';
 
@@ -220,10 +222,12 @@ function hexToBytes(hex: string): Uint8Array {
 
 function generateSecureSalt(length: number = SALT_BYTE_LENGTH): Uint8Array {
   const salt = new Uint8Array(length);
-  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+  if (typeof getRandomValues === 'function') {
+    getRandomValues(salt);
+  } else if (typeof globalThis.crypto?.getRandomValues === 'function') {
     globalThis.crypto.getRandomValues(salt);
   } else {
-    // Math.random fallback (e.g. lightweight node mock if crypto not polyfilled)
+    // Fallback for minimal test environments without crypto polyfill
     for (let i = 0; i < length; i++) {
       salt[i] = Math.floor(Math.random() * 256);
     }
@@ -371,11 +375,27 @@ export async function setupPin(pin: string): Promise<void> {
 
   await setSecret(PIN_SALT_KEY, saltHex);
   await setSecret(PIN_HASH_KEY, hashHex);
+  await setSecret(PIN_LENGTH_KEY, String(pin.length));
   await removeSecret(PIN_ATTEMPTS_KEY);
   await removeSecret(PIN_LOCKOUT_KEY);
 }
 
+export async function getConfiguredPinLength(): Promise<number | null> {
+  const lenStr = await getSecret(PIN_LENGTH_KEY);
+  if (!lenStr) return null;
+  const len = parseInt(lenStr, 10);
+  return len >= 4 && len <= 6 ? len : null;
+}
+
 export async function verifyPin(candidatePin: string): Promise<VerifyPinResult> {
+  // Validate complete PIN format without penalty for incomplete or invalid length inputs
+  if (!/^\d{4,6}$/.test(candidatePin)) {
+    return {
+      success: false,
+      error: 'El PIN debe tener entre 4 y 6 dígitos numéricos.',
+    };
+  }
+
   // Check lockout status
   const lockoutStatus = await getPinLockoutStatus();
   if (lockoutStatus.isLockedOut) {
@@ -449,9 +469,82 @@ export async function changePin(currentPin: string, newPin: string): Promise<Ver
   return { success: true };
 }
 
+// In-memory one-time recovery token valid for 5 minutes after successful biometric challenge
+let recoveryBiometricToken: { timestamp: number } | null = null;
+
+/**
+ * Pre-authorizes PIN recovery by requiring immediate fresh biometric authentication.
+ * Sets a short-lived recovery authorization (valid for 5 minutes).
+ */
+export async function verifyBiometricForRecovery(
+  promptMessage: string = 'Verifica tu identidad biométrica para restablecer tu PIN de seguridad',
+): Promise<{ success: boolean; error?: string }> {
+  const authResult = await authenticateWithBiometrics(promptMessage);
+  if (!authResult.success) {
+    recoveryBiometricToken = null;
+    return {
+      success: false,
+      error: authResult.error ?? 'Autenticación biométrica no superada. No se puede restablecer el PIN.',
+    };
+  }
+
+  recoveryBiometricToken = { timestamp: Date.now() };
+  return { success: true };
+}
+
+/**
+ * Safely resets a forgotten PIN using an immediate, fresh biometric authentication.
+ * Does not require knowing the previous PIN.
+ * Fails closed if biometrics is unavailable, un-enrolled, cancelled, or fails.
+ */
+export async function recoverPinWithBiometrics(
+  newPin: string,
+  promptMessage: string = 'Verifica tu identidad biométrica para restablecer tu PIN de seguridad',
+): Promise<{ success: boolean; error?: string }> {
+  if (!/^\d{4,6}$/.test(newPin)) {
+    return {
+      success: false,
+      error: 'El nuevo PIN debe tener entre 4 y 6 dígitos numéricos.',
+    };
+  }
+
+  // If already verified via verifyBiometricForRecovery within the last 5 minutes, consume token
+  const now = Date.now();
+  const isPreVerified =
+    recoveryBiometricToken !== null && now - recoveryBiometricToken.timestamp <= 5 * 60 * 1000;
+
+  // Reset token immediately (one-time use)
+  recoveryBiometricToken = null;
+
+  if (!isPreVerified) {
+    // Trigger immediate fresh biometric prompt
+    const authResult = await authenticateWithBiometrics(promptMessage);
+    if (!authResult.success) {
+      return {
+        success: false,
+        error: authResult.error ?? 'Autenticación biométrica no superada. No se puede restablecer el PIN.',
+      };
+    }
+  }
+
+  // Biometric verification succeeded! Apply the new PIN and reset lockout/attempts
+  try {
+    await setupPin(newPin);
+    return { success: true };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : 'Error al guardar la nueva configuración de PIN.';
+    return {
+      success: false,
+      error: message,
+    };
+  }
+}
+
 export async function removePinConfig(): Promise<void> {
   await removeSecret(PIN_HASH_KEY);
   await removeSecret(PIN_SALT_KEY);
+  await removeSecret(PIN_LENGTH_KEY);
   await removeSecret(PIN_ATTEMPTS_KEY);
   await removeSecret(PIN_LOCKOUT_KEY);
 }

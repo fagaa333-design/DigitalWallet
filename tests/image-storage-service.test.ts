@@ -17,7 +17,7 @@ import {
   MAX_IMAGE_SIZE_BYTES,
 } from '@/features/wallet/services/image-storage-service';
 import * as walletFiles from '@/shared/storage/wallet-files';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import { secureStoreMock } from './mocks/secure-store';
 import { fileSystemMock } from './mocks/file-system';
 
@@ -185,6 +185,72 @@ describe('image-storage-service', () => {
       });
       expect(() => deleteEncryptedImage('non-existent')).not.toThrow();
       deleteSpy.mockRestore();
+    });
+  });
+
+  describe('SEC-004: Temporary Encrypted Image Lifecycle & Abandonment Cleanup', () => {
+    const fileExists = (fileId: string) =>
+      new File(Paths.document, 'wallet-items-encrypted', `${fileId}.dwf`).exists;
+
+    it('simulates unmount cleanup deleting orphaned .dwf file when card creation is abandoned', async () => {
+      const testBytes = new Uint8Array([1, 2, 3, 4, 5]);
+      const fileId = await walletFiles.storeWalletFile(testBytes);
+      expect(fileExists(fileId)).toBe(true);
+
+      // Simulate form state refs
+      const imageIdRef = { current: fileId as string | null };
+      const isSavedRef = { current: false };
+
+      // Simulate unmount cleanup trigger:
+      const cleanup = () => {
+        if (imageIdRef.current && !isSavedRef.current) {
+          deleteEncryptedImage(imageIdRef.current);
+        }
+      };
+
+      cleanup();
+
+      // File should now be cleanly removed!
+      expect(fileExists(fileId)).toBe(false);
+    });
+
+    it('preserves encrypted .dwf file on unmount when card is successfully saved', async () => {
+      const testBytes = new Uint8Array([10, 20, 30, 40]);
+      const fileId = await walletFiles.storeWalletFile(testBytes);
+      expect(fileExists(fileId)).toBe(true);
+
+      // Simulate form state refs when saved
+      const imageIdRef = { current: fileId as string | null };
+      const isSavedRef = { current: true };
+
+      // Simulate unmount cleanup trigger:
+      const cleanup = () => {
+        if (imageIdRef.current && !isSavedRef.current) {
+          deleteEncryptedImage(imageIdRef.current);
+        }
+      };
+
+      cleanup();
+
+      // File must be preserved because isSavedRef was true!
+      expect(fileExists(fileId)).toBe(true);
+    });
+
+    it('replaces and cleans up previous file when user selects another image', async () => {
+      const firstBytes = new Uint8Array([1, 1, 1]);
+      const secondBytes = new Uint8Array([2, 2, 2]);
+
+      const firstFileId = await walletFiles.storeWalletFile(firstBytes);
+      const secondFileId = await walletFiles.storeWalletFile(secondBytes);
+
+      expect(fileExists(firstFileId)).toBe(true);
+      expect(fileExists(secondFileId)).toBe(true);
+
+      // Simulating handlePickImage replacing firstFileId:
+      deleteEncryptedImage(firstFileId);
+
+      expect(fileExists(firstFileId)).toBe(false);
+      expect(fileExists(secondFileId)).toBe(true);
     });
   });
 });

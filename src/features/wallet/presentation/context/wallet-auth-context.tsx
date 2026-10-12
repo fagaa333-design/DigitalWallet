@@ -13,9 +13,12 @@ import {
   getBiometricsStatus,
   authenticateWithBiometrics,
   isPinConfigured,
+  getConfiguredPinLength,
   getPinLockoutStatus,
   verifyPin,
   setupPin,
+  recoverPinWithBiometrics,
+  verifyBiometricForRecovery,
   BiometricsStatus,
   PinLockoutStatus,
   VerifyPinResult,
@@ -24,6 +27,7 @@ import {
 export interface WalletAuthContextValue {
   isLocked: boolean;
   isPinSet: boolean;
+  configuredPinLength: number | null;
   biometricsStatus: BiometricsStatus;
   lockoutStatus: PinLockoutStatus;
   authLoading: boolean;
@@ -32,6 +36,8 @@ export interface WalletAuthContextValue {
   unlockWithPin: (pin: string) => Promise<VerifyPinResult>;
   lockWallet: () => void;
   configurePin: (newPin: string) => Promise<void>;
+  verifyBiometricForRecovery: (promptMessage?: string) => Promise<{ success: boolean; error?: string }>;
+  recoverPinWithBiometrics: (newPin: string) => Promise<{ success: boolean; error?: string }>;
   refreshAuthStatus: () => Promise<void>;
   clearAuthError: () => void;
 }
@@ -49,6 +55,7 @@ export const WalletAuthProvider: React.FC<WalletAuthProviderProps> = ({
 }) => {
   const [isLocked, setIsLocked] = useState<boolean>(initialLocked);
   const [isPinSet, setIsPinSet] = useState<boolean>(false);
+  const [configuredPinLength, setConfiguredPinLength] = useState<number | null>(null);
   const [biometricsStatus, setBiometricsStatus] = useState<BiometricsStatus>({
     hasHardware: false,
     isEnrolled: false,
@@ -72,16 +79,18 @@ export const WalletAuthProvider: React.FC<WalletAuthProviderProps> = ({
 
   const refreshAuthStatus = useCallback(async () => {
     try {
-      const [bio, hasPin, lockout] = await Promise.all([
+      const [bio, hasPin, lockout, pinLen] = await Promise.all([
         getBiometricsStatus(),
         isPinConfigured(),
         getPinLockoutStatus(),
+        getConfiguredPinLength(),
       ]);
 
       if (isMountedRef.current) {
         setBiometricsStatus(bio);
         setIsPinSet(hasPin);
         setLockoutStatus(lockout);
+        setConfiguredPinLength(pinLen);
       }
     } catch (err: unknown) {
       if (isMountedRef.current) {
@@ -246,10 +255,59 @@ export const WalletAuthProvider: React.FC<WalletAuthProviderProps> = ({
     [refreshAuthStatus],
   );
 
+  const handleVerifyBiometricForRecovery = useCallback(
+    async (promptMessage?: string): Promise<{ success: boolean; error?: string }> => {
+      setAuthLoading(true);
+      setAuthError(null);
+      try {
+        const result = await verifyBiometricForRecovery(promptMessage);
+        if (!result.success && result.error) {
+          setAuthError(result.error);
+        }
+        return result;
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : 'Error en la verificación biométrica para recuperación.';
+        setAuthError(message);
+        return { success: false, error: message };
+      } finally {
+        setAuthLoading(false);
+      }
+    },
+    [],
+  );
+
+  const handleRecoverPinWithBiometrics = useCallback(
+    async (newPin: string): Promise<{ success: boolean; error?: string }> => {
+      setAuthLoading(true);
+      setAuthError(null);
+      try {
+        const result = await recoverPinWithBiometrics(newPin);
+        if (result.success) {
+          setIsPinSet(true);
+          setIsLocked(false);
+          await refreshAuthStatus();
+        } else if (result.error) {
+          setAuthError(result.error);
+        }
+        return result;
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : 'Error al recuperar el PIN con biometría.';
+        setAuthError(message);
+        return { success: false, error: message };
+      } finally {
+        setAuthLoading(false);
+      }
+    },
+    [refreshAuthStatus],
+  );
+
   const value = useMemo<WalletAuthContextValue>(
     () => ({
       isLocked,
       isPinSet,
+      configuredPinLength,
       biometricsStatus,
       lockoutStatus,
       authLoading,
@@ -258,12 +316,15 @@ export const WalletAuthProvider: React.FC<WalletAuthProviderProps> = ({
       unlockWithPin,
       lockWallet,
       configurePin,
+      verifyBiometricForRecovery: handleVerifyBiometricForRecovery,
+      recoverPinWithBiometrics: handleRecoverPinWithBiometrics,
       refreshAuthStatus,
       clearAuthError,
     }),
     [
       isLocked,
       isPinSet,
+      configuredPinLength,
       biometricsStatus,
       lockoutStatus,
       authLoading,
@@ -272,6 +333,8 @@ export const WalletAuthProvider: React.FC<WalletAuthProviderProps> = ({
       unlockWithPin,
       lockWallet,
       configurePin,
+      handleVerifyBiometricForRecovery,
+      handleRecoverPinWithBiometrics,
       refreshAuthStatus,
       clearAuthError,
     ],
